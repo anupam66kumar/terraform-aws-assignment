@@ -1,0 +1,26 @@
+# Terraform state and credentials
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+# Private SSH Keys & sensitive certs
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+
+# Ansible temp files and retries
+*.retry
+.ansible/
+ansible/assignment-key.pem
+
+# OS & Editor artifacts
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo

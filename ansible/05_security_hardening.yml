@@ -1,0 +1,117 @@
+---
+# ==============================================================================
+# 1. Hardening for All Hosts (Web + DB)
+# ==============================================================================
+- name: Apply System and SSH Hardening to All Hosts
+  hosts: all
+  become: true
+  tasks:
+    - name: Ensure root login via SSH is disabled
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+        state: present
+
+    - name: Ensure password authentication is disabled (Keys only)
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        state: present
+
+    - name: Limit maximum authentication attempts
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?MaxAuthTries'
+        line: 'MaxAuthTries 4'
+        state: present
+
+    - name: Restart sshd service to enforce changes
+      service:
+        name: sshd
+        state: restarted
+
+# ==============================================================================
+# 2. Web Server Firewall (UFW) Hardening
+# ==============================================================================
+- name: Configure UFW Firewall on Web Server
+  hosts: web
+  become: true
+  tasks:
+    - name: Set UFW default incoming policy to deny
+      ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Set UFW default outgoing policy to allow
+      ufw:
+        direction: outgoing
+        policy: allow
+
+    - name: Allow SSH on Web Server (Port 22)
+      ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+
+    - name: Allow HTTP (Port 80)
+      ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+
+    - name: Allow React Frontend (Port 3000)
+      ufw:
+        rule: allow
+        port: '3000'
+        proto: tcp
+
+    - name: Allow Express Backend API (Port 3001)
+      ufw:
+        rule: allow
+        port: '3001'
+        proto: tcp
+
+    - name: Enable UFW service on Web Server
+      ufw:
+        state: enabled
+
+# ==============================================================================
+# 3. Database Server Firewall (UFW) Hardening
+# ==============================================================================
+- name: Configure UFW Firewall on Database Server
+  hosts: db
+  become: true
+  vars:
+    # Gets the private IP of the web server
+    web_private_ip: "{{ hostvars['webserver']['ansible_default_ipv4']['address'] }}"
+
+  tasks:
+    - name: Set UFW default incoming policy to deny
+      ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Set UFW default outgoing policy to allow
+      ufw:
+        direction: outgoing
+        policy: allow
+
+    - name: Allow SSH on DB Server strictly from Web Server
+      ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+        from_ip: "{{ web_private_ip }}"
+
+    - name: Allow MongoDB on DB Server strictly from Web Server
+      ufw:
+        rule: allow
+        port: '27017'
+        proto: tcp
+        from_ip: "{{ web_private_ip }}"
+
+    - name: Enable UFW service on Database Server
+      ufw:
+        state: enabled

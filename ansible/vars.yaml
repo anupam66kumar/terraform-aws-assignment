@@ -1,0 +1,8 @@
+---
+# Repository details
+app_repo_url: "https://github.com/UnpredictablePrashant/TravelMemory.git" # Replace with your target MERN repo URL if different
+app_repo_branch: "master" # or "main" depending on the repository branch
+app_dest_dir: "/home/ubuntu/mern-app"
+
+# Node.js version setup
+nodejs_version: "20.x"

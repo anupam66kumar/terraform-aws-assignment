@@ -1,0 +1,94 @@
+---
+- name: Setup Web Server for MERN Application
+  hosts: web
+  become: true
+
+  vars:
+    nodejs_version: "20.x"
+    app_repo_url: "https://github.com/UnpredictablePrashant/TravelMemory.git" # Verify your exact repo URL
+    app_repo_branch: "main"
+    app_dest_dir: "/home/ubuntu/mern-app"
+
+  tasks:
+    - name: Update apt cache and install essential dependencies
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+        name:
+          - curl
+          - git
+          - build-essential
+        state: present
+
+    - name: Download NodeSource setup script
+      get_url:
+        url: "https://deb.nodesource.com/setup_{{ nodejs_version }}"
+        dest: /tmp/nodesource_setup.sh
+        mode: '0755'
+
+    - name: Run NodeSource setup script
+      command: /tmp/nodesource_setup.sh
+      args:
+        creates: /etc/apt/sources.list.d/nodesource.list
+
+    - name: Install Node.js and NPM
+      apt:
+        name: nodejs
+        state: present
+        update_cache: yes
+
+    - name: Verify Node.js and NPM versions
+      command: "{{ item }}"
+      register: versions
+      changed_when: false
+      loop:
+        - node -v
+        - npm -v
+
+    - name: Display Node and NPM versions
+      debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ versions.results }}"
+
+    - name: Install PM2 globally
+      npm:
+        name: pm2
+        global: yes
+        state: present
+
+    - name: Ensure destination directory exists with proper permissions
+      file:
+        path: "{{ app_dest_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Clone the MERN application repository
+      become: false # Run as ubuntu user so repo ownership stays clean
+      git:
+        repo: "{{ app_repo_url }}"
+        dest: "{{ app_dest_dir }}"
+        version: "{{ app_repo_branch }}"
+        force: yes
+
+    - name: Install root dependencies (if root package.json exists)
+      become: false
+      npm:
+        path: "{{ app_dest_dir }}"
+        state: present
+      ignore_errors: yes
+
+    - name: Install backend dependencies (if backend/ folder exists)
+      become: false
+      npm:
+        path: "{{ app_dest_dir }}/backend"
+        state: present
+      ignore_errors: yes
+
+    - name: Install frontend dependencies (if frontend/ folder exists)
+      become: false
+      npm:
+        path: "{{ app_dest_dir }}/frontend"
+        state: present
+      ignore_errors: yes

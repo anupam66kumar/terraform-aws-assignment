@@ -1,0 +1,120 @@
+---
+- name: Setup and Secure MongoDB on Database Server
+  hosts: db
+  become: true
+
+  vars:
+    db_name: "travelmemory"
+    db_user: "traveluser"
+    db_pass: "TravelSecurePass123!"
+    db_admin_user: "adminUser"
+    db_admin_pass: "AdminSecurePass123!"
+
+  tasks:
+    - name: Install gnupg, curl, and python3 dependencies
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+        name:
+          - gnupg
+          - curl
+          - python3-pip
+        state: present
+
+    - name: Install pymongo (needed for MongoDB tasks in Ansible/Python)
+      pip:
+        name: pymongo
+        break_system_packages: yes
+      ignore_errors: yes
+
+    - name: Import MongoDB public GPG key
+      apt_key:
+        url: https://www.mongodb.org/static/pgp/server-7.0.asc
+        state: present
+
+    - name: Add MongoDB 7.0 APT repository
+      apt_repository:
+        repo: "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse"
+        state: present
+        filename: mongodb-org-7.0
+
+    - name: Install MongoDB packages
+      apt:
+        update_cache: yes
+        name:
+          - mongodb-org
+          - mongodb-mongosh
+        state: present
+
+    - name: Ensure MongoDB binds to all network interfaces (for VPC internal access)
+      lineinfile:
+        path: /etc/mongod.conf
+        regexp: '^\s*bindIp:\s*.*'
+        line: '  bindIp: 0.0.0.0'
+        backup: yes
+
+    - name: Start and enable MongoDB service
+      systemd:
+        name: mongod
+        state: started
+        enabled: yes
+
+    - name: Wait for MongoDB port 27017 to be open
+      wait_for:
+        port: 27017
+        delay: 3
+        timeout: 30
+
+    - name: Check if admin user already exists
+      command: >
+        mongosh admin -u "{{ db_admin_user }}" -p "{{ db_admin_pass }}"
+        --authenticationDatabase admin --eval "db.runCommand({ ping: 1 })"
+      register: admin_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create MongoDB Admin user (when authentication is not yet enabled)
+      command: >
+        mongosh admin --eval '
+          db.createUser({
+            user: "{{ db_admin_user }}",
+            pwd: "{{ db_admin_pass }}",
+            roles: [ { role: "userAdminAnyDatabase", db: "admin" }, "readWriteAnyDatabase" ]
+          })
+        '
+      when: admin_check.rc != 0
+
+    - name: Create Application User on target database
+      command: >
+        mongosh admin -u "{{ db_admin_user }}" -p "{{ db_admin_pass }}" --authenticationDatabase admin --eval '
+          db = db.getSiblingDB("{{ db_name }}");
+          db.createUser({
+            user: "{{ db_user }}",
+            pwd: "{{ db_pass }}",
+            roles: [ { role: "readWrite", db: "{{ db_name }}" } ]
+          })
+        '
+      when: admin_check.rc != 0
+
+    - name: Enable authentication in mongod.conf
+      blockinfile:
+        path: /etc/mongod.conf
+        block: |
+          security:
+            authorization: enabled
+
+    - name: Restart MongoDB to enforce security authorization
+      systemd:
+        name: mongod
+        state: restarted
+
+    - name: Verify MongoDB authentication and service status
+      command: >
+        mongosh admin -u "{{ db_admin_user }}" -p "{{ db_admin_pass }}"
+        --authenticationDatabase admin --eval "db.runCommand({ connectionStatus: 1 })"
+      register: auth_status
+      changed_when: false
+
+    - name: Display MongoDB Connection Verification
+      debug:
+        msg: "MongoDB successfully installed, bound to 0.0.0.0, and secured with user authentication!"

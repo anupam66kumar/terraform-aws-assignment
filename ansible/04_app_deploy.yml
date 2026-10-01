@@ -1,0 +1,107 @@
+---
+- name: Deploy and Launch TravelMemory MERN Application
+  hosts: web
+  vars:
+    app_dest_dir: "/home/ubuntu/mern-app"
+    backend_port: 3001
+    frontend_port: 3000
+    db_user: "traveluser"
+    db_pass: "TravelSecurePass123!"
+    db_name: "travelmemory"
+    # Database private IP from Ansible inventory
+    db_host: "{{ hostvars['dbserver']['ansible_host'] }}"
+    # Web server public IP from Ansible inventory
+    web_host: "{{ ansible_host }}"
+
+  tasks:
+    # --- 1. Backend Environment Setup ---
+    - name: Create backend .env file
+      copy:
+        dest: "{{ app_dest_dir }}/backend/.env"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0600'
+        content: |
+          PORT={{ backend_port }}
+          MONGO_URI="mongodb://{{ db_user }}:{{ db_pass }}@{{ db_host }}:27017/{{ db_name }}?authSource=admin"
+
+    # --- 2. Frontend Environment Setup ---
+    - name: Create frontend .env file
+      copy:
+        dest: "{{ app_dest_dir }}/frontend/.env"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+        content: |
+          REACT_APP_BACKEND_URL="http://{{ web_host }}:{{ backend_port }}"
+
+    # Also handle src/url.js if the codebase references it directly
+    - name: Update hardcoded backend URLs if present in frontend source
+      replace:
+        path: "{{ item }}"
+        regexp: 'http:\/\/localhost:\d+'
+        replace: "http://{{ web_host }}:{{ backend_port }}"
+      loop:
+        - "{{ app_dest_dir }}/frontend/src/url.js"
+      ignore_errors: yes
+
+    # --- 3. Build Frontend ---
+    - name: Build frontend production bundle
+      become: false
+      command: npm run build
+      args:
+        chdir: "{{ app_dest_dir }}/frontend"
+      environment:
+        CI: "false"
+
+    # --- 4. Install 'serve' globally for serving React ---
+    - name: Install 'serve' package globally
+      become: true
+      npm:
+        name: serve
+        global: yes
+        state: present
+
+    # --- 5. Start Services with PM2 ---
+    - name: Stop existing PM2 processes if any
+      become: false
+      command: pm2 delete all
+      ignore_errors: yes
+
+    - name: Start Backend with PM2
+      become: false
+      command: pm2 start index.js --name "travel-backend"
+      args:
+        chdir: "{{ app_dest_dir }}/backend"
+
+    - name: Start Frontend with PM2 on port 3000
+      become: false
+      command: pm2 start "serve -s build -l {{ frontend_port }}" --name "travel-frontend"
+      args:
+        chdir: "{{ app_dest_dir }}/frontend"
+
+    - name: Save PM2 process list
+      become: false
+      command: pm2 save
+
+    # --- 6. Verification ---
+    - name: Wait for Backend port 3001 to respond
+      wait_for:
+        port: "{{ backend_port }}"
+        delay: 3
+        timeout: 30
+
+    - name: Wait for Frontend port 3000 to respond
+      wait_for:
+        port: "{{ frontend_port }}"
+        delay: 3
+        timeout: 30
+
+    - name: Display Application Access Details
+      debug:
+        msg:
+          - "=========================================================="
+          - "Frontend application: http://{{ web_host }}:{{ frontend_port }}"
+          - "Backend API endpoint: http://{{ web_host }}:{{ backend_port }}"
+          - "MongoDB Host:        {{ db_host }}:27017"
+          - "=========================================================="
